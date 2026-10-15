@@ -8,8 +8,11 @@ import { StreamingText } from "@/components/spectrumui/blocks/ai-assistants/stre
 import { ThinkingDots } from "@/components/spectrumui/blocks/ai-assistants/thinking-dots";
 import { ErrorState } from "@/components/spectrumui/blocks/ai-assistants/error-state";
 import { MessageActions } from "@/components/spectrumui/blocks/ai-assistants/message-actions";
-import type { Attachment, Citation, SuggestedPrompt } from "@/components/spectrumui/blocks/ai-assistants/types";
+import type { Attachment, Citation, ModelOption, SuggestedPrompt } from "@/components/spectrumui/blocks/ai-assistants/types";
+import { SuggestionBanner } from "@/components/spectrumui/blocks/ai-assistants/suggestion-banner";
+import SpectrumBlockWorkbench from "@/app/_components/spectrum-block-workbench";
 
+const modelOptions: ModelOption[] = [{ id: "sarvam-105b-conversations", name: "California law research" }];
 type AttachedDocument = { name: string; content: string };
 type Turn = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; citations?: Citation[]; documents?: AttachedDocument[] };
 const prompts: SuggestedPrompt[] = [
@@ -55,6 +58,8 @@ export default function LawResearchPage() {
   const [retryText, setRetryText] = useState("");
   const [attachments, setAttachments] = useState<Array<Attachment & { content: string }>>([]);
   const [fileError, setFileError] = useState("");
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("sarvam-105b-conversations");
   const fileInput = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -84,7 +89,7 @@ export default function LawResearchPage() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: history, documents: uniqueDocuments }),
+        body: JSON.stringify({ messages: history, documents: uniqueDocuments, model: selectedModel }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -127,7 +132,7 @@ export default function LawResearchPage() {
       setBusy(false);
       requestAnimationFrame(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; });
     }
-  }, [busy, turns, attachments]);
+  }, [busy, turns, attachments, selectedModel]);
 
   const handleFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files || []);
@@ -157,13 +162,17 @@ export default function LawResearchPage() {
     });
   };
 
+  const latestQuestion = [...turns].reverse().find((turn) => turn.role === "user")?.text || "";
+  const latestAnswer = [...turns].reverse().find((turn) => turn.role === "assistant");
+
   return (
     <main className="flex h-dvh flex-col bg-background text-foreground">
       <header className="flex h-16 shrink-0 items-center border-b border-border/60 px-5 sm:px-8">
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">Spectrum UI</Link>
         <span className="mx-3 text-muted-foreground">/</span>
         <h1 className="text-sm font-semibold">California Law Research</h1>
-        <span className="ml-auto text-xs text-muted-foreground">Statutes · Bills · Cases · Rules · Forms</span>
+        <button type="button" onClick={() => setWorkspaceOpen(true)} className="ml-auto rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-muted">Workspace</button>
+        <span className="ml-3 hidden text-xs text-muted-foreground md:inline">Statutes · Bills · Cases · Rules · Forms</span>
       </header>
       <section ref={scroller} className="flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-8 sm:px-8">
@@ -190,8 +199,9 @@ export default function LawResearchPage() {
                     <div>
                       {turn.text ? <StreamingText text={turn.text} streaming={turn.streaming} citations={turn.citations || []} /> : turn.streaming ? <ThinkingDots label="Researching California law" /> : null}
                       {!turn.streaming && turn.text ? (
-                        <div className="mt-3">
+                        <div className="mt-3 space-y-3">
                           <MessageActions content={turn.text} onCopy={(text) => void navigator.clipboard?.writeText(text)} />
+                          <SuggestionBanner suggestion="Map every conclusion to primary authority" detail="Ask for an element-by-element explanation with each claim tied to a verified source." applyLabel="Trace the authorities" onApply={() => void send("Map every conclusion in your last answer to the exact primary authority that supports it. Separate verified text, interpretation, and unresolved gaps.")} />
                         </div>
                       ) : null}
                     </div>
@@ -221,6 +231,22 @@ export default function LawResearchPage() {
           <p className="mt-2 text-center text-[11px] text-muted-foreground">Check cited source text and current status before relying on a legal conclusion.</p>
         </div>
       </footer>
+      {workspaceOpen ? (
+        <SpectrumBlockWorkbench
+          onClose={() => setWorkspaceOpen(false)}
+          onRunPrompt={(prompt) => void send(prompt)}
+          question={latestQuestion}
+          answer={latestAnswer?.text || ""}
+          citations={latestAnswer?.citations || []}
+          models={modelOptions}
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
+          busy={busy}
+          questions={turns.filter((turn) => turn.role === "user").map((turn) => ({ id: turn.id, title: turn.text.slice(0, 90), group: "Conversation" }))}
+          onSelectQuestion={(id) => { const turn = turns.find((item) => item.id === id && item.role === "user"); if (turn) void send(turn.text); }}
+          onVoiceText={(text) => void send(text)}
+        />
+      ) : null}
     </main>
   );
 }
