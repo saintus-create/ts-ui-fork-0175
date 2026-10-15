@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import { ChatEmptyState } from "@/components/spectrumui/blocks/ai-assistants/chat-empty-state";
 import { PromptComposer } from "@/components/spectrumui/blocks/ai-assistants/prompt-composer";
@@ -134,7 +134,7 @@ export default function LawResearchPage() {
     }
   }, [busy, turns, attachments, selectedModel]);
 
-  const handleFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files || []);
     event.target.value = "";
     if (!selected.length) return;
