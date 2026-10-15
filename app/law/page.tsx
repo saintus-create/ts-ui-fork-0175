@@ -1,0 +1,174 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import Link from "next/link";
+import { ChatEmptyState } from "@/components/spectrumui/blocks/ai-assistants/chat-empty-state";
+import { PromptComposer } from "@/components/spectrumui/blocks/ai-assistants/prompt-composer";
+import { StreamingText } from "@/components/spectrumui/blocks/ai-assistants/streaming-text";
+import { ThinkingDots } from "@/components/spectrumui/blocks/ai-assistants/thinking-dots";
+import { ErrorState } from "@/components/spectrumui/blocks/ai-assistants/error-state";
+import { MessageActions } from "@/components/spectrumui/blocks/ai-assistants/message-actions";
+import type { Citation, SuggestedPrompt } from "@/components/spectrumui/blocks/ai-assistants/types";
+
+type Turn = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; citations?: Citation[] };
+const prompts: SuggestedPrompt[] = [
+  { id: "p1", label: "Explain a California statute", prompt: "Explain this California statute in plain English and identify each operative requirement." },
+  { id: "p2", label: "Understand a court form", prompt: "How does a California Judicial Council form work, and what rules govern its use?" },
+  { id: "p3", label: "Compare statutes and cases", prompt: "Find the California statutes and published appellate decisions governing a procedural due-process issue." },
+  { id: "p4", label: "Trace a legal definition", prompt: "Find the statutory definition of a legal term and follow every cross-reference needed to understand it." },
+];
+
+function splitAnswer(raw: string) {
+  const authAt = raw.search(/\n\s*AUTHORITIES:/i);
+  const followAt = raw.search(/\n\s*FOLLOWUPS:/i);
+  const cut = Math.min(authAt < 0 ? raw.length : authAt, followAt < 0 ? raw.length : followAt);
+  const body = raw.slice(0, cut).trim();
+  const authorities: Citation[] = [];
+  if (authAt >= 0) {
+    const rest = raw.slice(authAt);
+    const end = followAt > authAt ? followAt - authAt : rest.length;
+    for (const line of rest.slice(0, end).split("\n")) {
+      const match = line.match(/^\s*\[([^\]]+)\]\s*(.*)$/);
+      if (!match) continue;
+      const id = match[1].trim().split(/\s+/)[0];
+      const label = match[1].trim().slice(id.length).trim() || match[2].trim();
+      const link = match[2].match(/\(#law-authority:([^)]+)\)/);
+      const rawUrl = link?.[1] || "";
+      let url = "/";
+      try { url = new URL(rawUrl, window.location.origin).href; } catch {}
+      authorities.push({ id, index: authorities.length + 1, title: label || id, url });
+    }
+  }
+  const byMarker = new Map(authorities.map((c) => [c.id.toLowerCase(), c.index]));
+  const normalized = body.replace(/\[([a-z]{1,2}\d{1,3})\]/gi, (whole, marker: string) => {
+    const index = byMarker.get(marker.toLowerCase());
+    return index ? `[${index}]` : whole;
+  });
+  return { body: normalized, authorities };
+}
+
+export default function LawResearchPage() {
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [retryText, setRetryText] = useState("");
+  const scroller = useRef<HTMLDivElement>(null);
+
+  const send = useCallback(async (input: string) => {
+    const question = input.trim();
+    if (!question || busy) return;
+    setError("");
+    setRetryText(question);
+    const userTurn: Turn = { id: `u-${Date.now()}`, role: "user", text: question };
+    const assistantId = `a-${Date.now()}`;
+    const history = [...turns, userTurn].map((turn) => ({
+      id: turn.id,
+      role: turn.role,
+      parts: [{ type: "text" as const, text: turn.text }],
+    }));
+    setTurns((previous) => [...previous, userTurn, { id: assistantId, role: "assistant", text: "", streaming: true }]);
+    setBusy(true);
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messages: history }),
+      });
+      if (!response.ok || !response.body) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(detail || `Research request failed (${response.status}).`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const event = JSON.parse(payload);
+            if (event.type === "text-delta" && event.delta) {
+              accumulated += event.delta;
+              setTurns((previous) => previous.map((turn) => turn.id === assistantId ? { ...turn, text: accumulated } : turn));
+            }
+          } catch { /* Ignore stream metadata that is not a text event. */ }
+        }
+      }
+      const parsed = splitAnswer(accumulated);
+      setTurns((previous) => previous.map((turn) => turn.id === assistantId ? { ...turn, text: parsed.body, citations: parsed.authorities, streaming: false } : turn));
+      if (!accumulated.trim()) throw new Error("The research service returned an empty answer.");
+    } catch (cause) {
+      setTurns((previous) => previous.filter((turn) => turn.id !== assistantId));
+      setError(cause instanceof Error ? cause.message : "The research service could not complete the request.");
+    } finally {
+      setBusy(false);
+      requestAnimationFrame(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; });
+    }
+  }, [busy, turns]);
+
+  return (
+    <main className="flex h-dvh flex-col bg-background text-foreground">
+      <header className="flex h-16 shrink-0 items-center border-b border-border/60 px-5 sm:px-8">
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">Spectrum UI</Link>
+        <span className="mx-3 text-muted-foreground">/</span>
+        <h1 className="text-sm font-semibold">California Law Research</h1>
+        <span className="ml-auto text-xs text-muted-foreground">Statutes · Bills · Cases · Rules · Forms</span>
+      </header>
+      <section ref={scroller} className="flex-1 overflow-y-auto">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-8 sm:px-8">
+          {turns.length === 0 ? (
+            <div className="flex flex-1 items-center">
+              <ChatEmptyState
+                title="What do you need to understand?"
+                subtitle="Ask a California-law question. Answers are grounded in retrieved legal sources and include authorities when available."
+                prompts={prompts}
+                onSelectPrompt={(prompt) => void send(prompt.prompt)}
+                variant="Centered"
+              />
+            </div>
+          ) : (
+            <div className="space-y-8">
+              {turns.map((turn) => (
+                <article key={turn.id} className={turn.role === "user" ? "ml-auto max-w-[88%]" : "mr-auto w-full max-w-3xl"}>
+                  {turn.role === "user" ? (
+                    <div className="rounded-2xl bg-muted px-4 py-3 text-sm leading-6 whitespace-pre-wrap">{turn.text}</div>
+                  ) : (
+                    <div>
+                      {turn.text ? <StreamingText text={turn.text} streaming={turn.streaming} citations={turn.citations || []} /> : turn.streaming ? <ThinkingDots label="Researching California law" /> : null}
+                      {!turn.streaming && turn.text ? (
+                        <div className="mt-3">
+                          <MessageActions content={turn.text} onCopy={(text) => void navigator.clipboard?.writeText(text)} />
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </article>
+              ))}
+              {busy ? <div className="py-2"><ThinkingDots label="Searching statutes, cases, bills, rules, and forms" /></div> : null}
+              {error ? <ErrorState title="Research request failed" message={error} onRetry={() => void send(retryText)} variant="Inline" /> : null}
+            </div>
+          )}
+        </div>
+      </section>
+      <footer className="shrink-0 border-t border-border/60 px-4 py-4 sm:px-8">
+        <div className="mx-auto max-w-4xl">
+          <PromptComposer
+            placeholder="Ask a question about California law..."
+            onSend={(text) => void send(text)}
+            isGenerating={busy}
+            onStop={() => setBusy(false)}
+            variant="Default"
+          />
+          <p className="mt-2 text-center text-[11px] text-muted-foreground">Check cited source text and current status before relying on a legal conclusion.</p>
+        </div>
+      </footer>
+    </main>
+  );
+}
