@@ -53,6 +53,7 @@ export default function LawResearchPage() {
   const [error, setError] = useState("");
   const [retryText, setRetryText] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const send = useCallback(async (input: string) => {
     const question = input.trim();
@@ -68,11 +69,14 @@ export default function LawResearchPage() {
     }));
     setTurns((previous) => [...previous, userTurn, { id: assistantId, role: "assistant", text: "", streaming: true }]);
     setBusy(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ messages: history }),
+        signal: controller.signal,
       });
       if (!response.ok || !response.body) {
         const detail = await response.text().catch(() => "");
@@ -106,8 +110,11 @@ export default function LawResearchPage() {
       if (!accumulated.trim()) throw new Error("The research service returned an empty answer.");
     } catch (cause) {
       setTurns((previous) => previous.filter((turn) => turn.id !== assistantId));
-      setError(cause instanceof Error ? cause.message : "The research service could not complete the request.");
+      if (!(cause instanceof DOMException && cause.name === "AbortError")) {
+        setError(cause instanceof Error ? cause.message : "The research service could not complete the request.");
+      }
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
       requestAnimationFrame(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; });
     }
@@ -163,7 +170,7 @@ export default function LawResearchPage() {
             placeholder="Ask a question about California law..."
             onSend={(text) => void send(text)}
             isGenerating={busy}
-            onStop={() => setBusy(false)}
+            onStop={() => abortRef.current?.abort()}
             variant="Default"
           />
           <p className="mt-2 text-center text-[11px] text-muted-foreground">Check cited source text and current status before relying on a legal conclusion.</p>
