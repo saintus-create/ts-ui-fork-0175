@@ -23,12 +23,9 @@ import research from "@/agent/tools/research";
 import { prosecutionContract, prosecutionHeadingGaps } from "@/agent/lib/prosecution-analysis";
 import { SARVAM_KEY } from "@/lib/engine";
 
-// Prefer the deployment env var, then fall back to the key the browser path
-// already uses in lib/engine.js. Without the fallback every request 503s on a
-// deployment that never had SARVAM_API_KEY set.
+// Credentials stay in server-side environment variables; never embed provider keys in source.
 const KEY = process.env.SARVAM_API_KEY || SARVAM_KEY;
-if (!process.env.SARVAM_API_KEY)
-  console.warn("[api/chat] SARVAM_API_KEY is not set; using the built-in engine key");
+if (!KEY) console.warn("[api/chat] SARVAM_API_KEY is not configured; the default provider cannot answer requests.");
 
 const sarvam = createOpenAICompatible({
   name: "sarvam",
