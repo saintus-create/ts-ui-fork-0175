@@ -54,7 +54,8 @@ export function SiteHeader() {
               </Link>
             </div>
 
-            <nav className="flex items-center gap-0.5">
+            <nav className="flex items-center gap-2">
+              <Link href="/law" className="rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground">Law Research</Link>
               <ThemeToggle />
             </nav>
           </div>
