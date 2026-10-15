@@ -155,11 +155,8 @@ export default function LawResearchPage() {
         setFileError(`Could not read ${file.name}.`);
       }
     }
-    setAttachments((previous) => {
-      const merged = [...previous, ...additions];
-      if (merged.length > 5) { setFileError("Attach no more than five documents at once."); return merged.slice(0, 5); }
-      return merged;
-    });
+    if (attachments.length + additions.length > 5) setFileError("Attach no more than five documents at once.");
+    setAttachments((previous) => [...previous, ...additions].slice(0, 5));
   };
 
   const latestQuestion = [...turns].reverse().find((turn) => turn.role === "user")?.text || "";
