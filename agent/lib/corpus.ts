@@ -33,8 +33,7 @@ async function readGz(rel: string): Promise<string> {
   try {
     return gunzipSync(fs.readFileSync(local)).toString("utf8");
   } catch {
-    const base = appOrigin().endsWith("/public") ? appOrigin() : `${appOrigin()}/public`;
-    const buf = await fetchGz(`${base}/${rel}`);
+    const buf = await fetchGz(`https://raw.githubusercontent.com/saintus-create/CALEGINFO/main/public/${rel}`);
     return gunzipSync(buf).toString("utf8");
   }
 }
