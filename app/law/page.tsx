@@ -146,8 +146,8 @@ export default function LawResearchPage() {
         setFileError(`${file.name}: use a PDF, text, Markdown, CSV, JSON, HTML, or XML file. Word files are not supported yet.`);
         continue;
       }
-      if (file.size > (isPdf ? 5_000_000 : 100_000)) {
-        setFileError(`${file.name}: ${isPdf ? "maximum size is 5 MB" : "maximum size is 100 KB"} per file.`);
+      if (file.size > (isPdf ? 4_000_000 : 100_000)) {
+        setFileError(`${file.name}: ${isPdf ? "maximum size is 4 MB" : "maximum size is 100 KB"} per file.`);
         continue;
       }
       try {
