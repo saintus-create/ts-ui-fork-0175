@@ -4,7 +4,7 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File) || !file.name.toLowerCase().endsWith(".pdf")) return Response.json({ error: "Attach a PDF document." }, { status: 400 });
-  if (file.size > 5000000) return Response.json({ error: "PDF limit is 5 MB." }, { status: 413 });
+  if (file.size > 4000000) return Response.json({ error: "PDF limit is 4 MB." }, { status: 413 });
   try {
     const parsed = await pdfParse(Buffer.from(await file.arrayBuffer()));
     const text = String(parsed.text || "").trim();
