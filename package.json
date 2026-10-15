@@ -121,7 +121,10 @@
     "unist-builder": "^4.0.0",
     "unist-util-visit": "^5.0.0",
     "vaul": "^1.1.2",
-    "zod": "^3.25.20"
+    "zod": "4.4.3",
+    "ai": "7.0.105",
+    "@ai-sdk/openai-compatible": "^2.0.78",
+    "eve": "^0.54.2"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.15",
