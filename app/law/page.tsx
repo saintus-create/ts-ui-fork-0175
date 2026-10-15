@@ -141,18 +141,31 @@ export default function LawResearchPage() {
     const allowed = /\.(txt|md|csv|json|html?|xml)$/i;
     const additions: Array<Attachment & { content: string }> = [];
     for (const file of selected) {
-      if (!allowed.test(file.name)) {
-        setFileError(`${file.name}: use a text, Markdown, CSV, JSON, HTML, or XML file. PDF and Word files are not extracted by this upload control.`);
+      const isPdf = /\.pdf$/i.test(file.name);
+      if (!allowed.test(file.name) && !isPdf) {
+        setFileError(`${file.name}: use a PDF, text, Markdown, CSV, JSON, HTML, or XML file. Word files are not supported yet.`);
         continue;
       }
-      if (file.size > 100_000) {
-        setFileError(`${file.name}: maximum size is 100 KB per file.`);
+      if (file.size > (isPdf ? 5_000_000 : 100_000)) {
+        setFileError(`${file.name}: ${isPdf ? "maximum size is 5 MB" : "maximum size is 100 KB"} per file.`);
         continue;
       }
       try {
-        additions.push({ id: `${file.name}-${file.size}-${file.lastModified}`, name: file.name, size: file.size, type: file.type || "text/plain", content: await file.text() });
-      } catch {
-        setFileError(`Could not read ${file.name}.`);
+        let content: string;
+        if (isPdf) {
+          const form = new FormData();
+          form.append("file", file);
+          const response = await fetch("/api/extract-document", { method: "POST", body: form });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || `Could not extract ${file.name}.`);
+          content = String(result.text || "");
+        } else {
+          content = await file.text();
+        }
+        if (!content.trim()) { setFileError(`${file.name}: no readable text was found.`); continue; }
+        additions.push({ id: `${file.name}-${file.size}-${file.lastModified}`, name: file.name, size: file.size, type: file.type || (isPdf ? "application/pdf" : "text/plain"), content });
+      } catch (cause) {
+        setFileError(cause instanceof Error ? cause.message : `Could not read ${file.name}.`);
       }
     }
     if (attachments.length + additions.length > 5) setFileError("Attach no more than five documents at once.");
@@ -213,7 +226,7 @@ export default function LawResearchPage() {
       </section>
       <footer className="shrink-0 border-t border-border/60 px-4 py-4 sm:px-8">
         <div className="mx-auto max-w-4xl">
-          <input ref={fileInput} type="file" multiple accept=".txt,.md,.csv,.json,.html,.htm,.xml" onChange={handleFiles} className="hidden" aria-label="Attach text documents" />
+          <input ref={fileInput} type="file" multiple accept=".pdf,.txt,.md,.csv,.json,.html,.htm,.xml" onChange={handleFiles} className="hidden" aria-label="Attach text documents" />
           {fileError ? <p role="status" className="mb-2 text-sm text-destructive">{fileError}</p> : null}
           <PromptComposer
             placeholder="Ask a question about California law..."
