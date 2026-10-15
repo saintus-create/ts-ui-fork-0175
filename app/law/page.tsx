@@ -8,9 +8,10 @@ import { StreamingText } from "@/components/spectrumui/blocks/ai-assistants/stre
 import { ThinkingDots } from "@/components/spectrumui/blocks/ai-assistants/thinking-dots";
 import { ErrorState } from "@/components/spectrumui/blocks/ai-assistants/error-state";
 import { MessageActions } from "@/components/spectrumui/blocks/ai-assistants/message-actions";
-import type { Citation, SuggestedPrompt } from "@/components/spectrumui/blocks/ai-assistants/types";
+import type { Attachment, Citation, SuggestedPrompt } from "@/components/spectrumui/blocks/ai-assistants/types";
 
-type Turn = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; citations?: Citation[] };
+type AttachedDocument = { name: string; content: string };
+type Turn = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; citations?: Citation[]; documents?: AttachedDocument[] };
 const prompts: SuggestedPrompt[] = [
   { id: "p1", label: "Explain a California statute", prompt: "Explain this California statute in plain English and identify each operative requirement." },
   { id: "p2", label: "Understand a court form", prompt: "How does a California Judicial Council form work, and what rules govern its use?" },
@@ -52,6 +53,9 @@ export default function LawResearchPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [retryText, setRetryText] = useState("");
+  const [attachments, setAttachments] = useState<Array<Attachment & { content: string }>>([]);
+  const [fileError, setFileError] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -60,14 +64,19 @@ export default function LawResearchPage() {
     if (!question || busy) return;
     setError("");
     setRetryText(question);
-    const userTurn: Turn = { id: `u-${Date.now()}`, role: "user", text: question };
+    const attachedNow = attachments.map(({ name, content }) => ({ name, content }));
+    const userTurn: Turn = { id: `u-${Date.now()}`, role: "user", text: question, documents: attachedNow };
     const assistantId = `a-${Date.now()}`;
+    const allDocuments = [...turns.flatMap((turn) => turn.documents || []), ...attachedNow];
+    const uniqueDocuments = [...new Map(allDocuments.map((doc) => [`${doc.name}\u0000${doc.content}`, doc])).values()];
     const history = [...turns, userTurn].map((turn) => ({
       id: turn.id,
       role: turn.role,
       parts: [{ type: "text" as const, text: turn.text }],
     }));
     setTurns((previous) => [...previous, userTurn, { id: assistantId, role: "assistant", text: "", streaming: true }]);
+    setAttachments([]);
+    setFileError("");
     setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -75,7 +84,7 @@ export default function LawResearchPage() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify({ messages: history, documents: uniqueDocuments }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
@@ -118,7 +127,35 @@ export default function LawResearchPage() {
       setBusy(false);
       requestAnimationFrame(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; });
     }
-  }, [busy, turns]);
+  }, [busy, turns, attachments]);
+
+  const handleFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!selected.length) return;
+    const allowed = /\.(txt|md|csv|json|html?|xml)$/i;
+    const additions: Array<Attachment & { content: string }> = [];
+    for (const file of selected) {
+      if (!allowed.test(file.name)) {
+        setFileError(`${file.name}: use a text, Markdown, CSV, JSON, HTML, or XML file. PDF and Word files are not extracted by this upload control.`);
+        continue;
+      }
+      if (file.size > 100_000) {
+        setFileError(`${file.name}: maximum size is 100 KB per file.`);
+        continue;
+      }
+      try {
+        additions.push({ id: `${file.name}-${file.size}-${file.lastModified}`, name: file.name, size: file.size, type: file.type || "text/plain", content: await file.text() });
+      } catch {
+        setFileError(`Could not read ${file.name}.`);
+      }
+    }
+    setAttachments((previous) => {
+      const merged = [...previous, ...additions];
+      if (merged.length > 5) { setFileError("Attach no more than five documents at once."); return merged.slice(0, 5); }
+      return merged;
+    });
+  };
 
   return (
     <main className="flex h-dvh flex-col bg-background text-foreground">
@@ -145,7 +182,10 @@ export default function LawResearchPage() {
               {turns.map((turn) => (
                 <article key={turn.id} className={turn.role === "user" ? "ml-auto max-w-[88%]" : "mr-auto w-full max-w-3xl"}>
                   {turn.role === "user" ? (
-                    <div className="rounded-2xl bg-muted px-4 py-3 text-sm leading-6 whitespace-pre-wrap">{turn.text}</div>
+                    <div className="rounded-2xl bg-muted px-4 py-3 text-sm leading-6 whitespace-pre-wrap">
+                      {turn.text}
+                      {turn.documents?.length ? <div className="mt-2 flex flex-wrap gap-1.5">{turn.documents.map((doc) => <span key={`${doc.name}-${doc.content.length}`} className="rounded-md bg-background/70 px-2 py-1 text-xs text-muted-foreground">Document: {doc.name}</span>)}</div> : null}
+                    </div>
                   ) : (
                     <div>
                       {turn.text ? <StreamingText text={turn.text} streaming={turn.streaming} citations={turn.citations || []} /> : turn.streaming ? <ThinkingDots label="Researching California law" /> : null}
@@ -166,10 +206,15 @@ export default function LawResearchPage() {
       </section>
       <footer className="shrink-0 border-t border-border/60 px-4 py-4 sm:px-8">
         <div className="mx-auto max-w-4xl">
+          <input ref={fileInput} type="file" multiple accept=".txt,.md,.csv,.json,.html,.htm,.xml" onChange={handleFiles} className="hidden" aria-label="Attach text documents" />
+          {fileError ? <p role="status" className="mb-2 text-sm text-destructive">{fileError}</p> : null}
           <PromptComposer
             placeholder="Ask a question about California law..."
             onSend={(text) => void send(text)}
             isGenerating={busy}
+            attachments={attachments}
+            onRemoveAttachment={(id) => setAttachments((previous) => previous.filter((file) => file.id !== id))}
+            onAttach={() => fileInput.current?.click()}
             onStop={() => abortRef.current?.abort()}
             variant="Default"
           />
